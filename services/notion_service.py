@@ -75,6 +75,64 @@ class NotionService:
 
         return {"image_urls": image_urls, "text_notes": text_notes}
 
+    def get_attendance_stats(self, reference_date: date) -> dict:
+        """스트릭(연속 출석일)과 이번 달 출석률을 계산해 반환."""
+        # 전체 출석 항목 조회 (날짜 내림차순)
+        response = self.client.databases.query(
+            database_id=config.DAILY_DB_ID,
+            filter={"property": config.DAILY_PROP_ATTENDANCE, "checkbox": {"equals": True}},
+            sorts=[{"property": config.DAILY_PROP_DATE, "direction": "descending"}],
+        )
+        attended_pages = response.get("results", [])
+
+        # 출석한 날짜 집합
+        attended_dates: set[date] = set()
+        for page in attended_pages:
+            date_val = page["properties"].get(config.DAILY_PROP_DATE, {}).get("date")
+            if date_val and date_val.get("start"):
+                attended_dates.add(date.fromisoformat(date_val["start"]))
+
+        # ── 스트릭 계산 ───────────────────────────────────────────────────
+        # reference_date 기준으로 가장 최근 출석일부터 연속 체크
+        streak = 0
+        check = reference_date
+        from datetime import timedelta
+        while check in attended_dates:
+            streak += 1
+            check -= timedelta(days=1)
+
+        # ── 월별 출석률 ───────────────────────────────────────────────────
+        year, month = reference_date.year, reference_date.month
+        # 이번 달 전체 항목 수 조회 (출석 여부 무관)
+        month_start = date(year, month, 1)
+        import calendar
+        last_day = calendar.monthrange(year, month)[1]
+        month_end = date(year, month, last_day)
+
+        total_resp = self.client.databases.query(
+            database_id=config.DAILY_DB_ID,
+            filter={
+                "and": [
+                    {"property": config.DAILY_PROP_DATE, "date": {"on_or_after": month_start.isoformat()}},
+                    {"property": config.DAILY_PROP_DATE, "date": {"on_or_before": month_end.isoformat()}},
+                ]
+            },
+        )
+        total_days = len(total_resp.get("results", []))
+        monthly_attended = sum(
+            1 for d in attended_dates
+            if d.year == year and d.month == month
+        )
+        rate = round(monthly_attended / total_days * 100) if total_days > 0 else 0
+
+        return {
+            "streak": streak,
+            "monthly_attended": monthly_attended,
+            "monthly_total": total_days,
+            "monthly_rate": rate,
+            "month_label": f"{year}년 {month}월",
+        }
+
     def update_daily_page(self, page_id: str, keywords: list[str]) -> None:
         """일별 페이지의 키워드, 출석/AI 완료 체크박스만 업데이트한다. 본문은 건드리지 않음."""
         self.client.pages.update(
@@ -98,6 +156,7 @@ class NotionService:
         attendance_count: int,
         daily_analyses: list[dict],
         insights: dict,
+        stats: dict | None = None,
     ) -> str:
         """주간 정리 DB에 새 페이지를 생성하고 page_id 반환."""
         keywords = insights.get("keywords", [])
@@ -123,7 +182,7 @@ class NotionService:
         page_id: str = response["id"]
 
         # 페이지 본문 작성
-        blocks = self._build_weekly_blocks(daily_analyses, insights)
+        blocks = self._build_weekly_blocks(daily_analyses, insights, stats)
         # Notion API는 한 번에 최대 100개 블록만 허용
         for i in range(0, len(blocks), 100):
             self.client.blocks.children.append(
@@ -134,7 +193,7 @@ class NotionService:
 
         return page_id
 
-    def _build_weekly_blocks(self, daily_analyses: list[dict], insights: dict) -> list[dict]:
+    def _build_weekly_blocks(self, daily_analyses: list[dict], insights: dict, stats: dict | None = None) -> list[dict]:
         def h1(text: str) -> dict:
             return {
                 "type": "heading_1",
@@ -168,7 +227,33 @@ class NotionService:
         def divider() -> dict:
             return {"type": "divider", "divider": {}}
 
+        def callout(text: str, emoji: str) -> dict:
+            return {
+                "type": "callout",
+                "callout": {
+                    "rich_text": [{"type": "text", "text": {"content": text}}],
+                    "icon": {"type": "emoji", "emoji": emoji},
+                    "color": "gray_background",
+                },
+            }
+
         blocks: list[dict] = []
+
+        # ── 0. 스트릭 & 출석률 ─────────────────────────────────────────────
+        if stats:
+            streak = stats.get("streak", 0)
+            streak_fire = "🔥" * min(streak, 5) if streak > 0 else "💤"
+            blocks.append(callout(
+                f"연속 출석  {streak_fire}  {streak}일 연속",
+                "🔥",
+            ))
+            blocks.append(callout(
+                f"{stats.get('month_label', '')} 출석률  "
+                f"{stats.get('monthly_attended', 0)}/{stats.get('monthly_total', 0)}일  "
+                f"({stats.get('monthly_rate', 0)}%)",
+                "📅",
+            ))
+            blocks.append({"type": "divider", "divider": {}})
 
         # ── 1. 일별 기사 정리 ──────────────────────────────────────────────
         blocks.append(h1("📰 일별 기사 정리"))

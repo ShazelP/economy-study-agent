@@ -57,6 +57,31 @@ class ClaudeService:
 
         return self._parse_json_response(response.text)
 
+    def generate_weekly_quiz(
+        self, week_label: str, daily_analyses: list[dict]
+    ) -> list[dict]:
+        """주간 내용 기반으로 퀴즈 3문제 생성."""
+        daily_summaries = self._format_daily_summaries(daily_analyses)
+
+        prompt = config.WEEKLY_QUIZ_PROMPT.replace(
+            "{{week_label}}", week_label
+        ).replace("{{daily_summaries}}", daily_summaries)
+
+        response = _client.models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=config.SYSTEM_PROMPT,
+                max_output_tokens=4096,
+                temperature=0.5,
+                response_mime_type="application/json",
+            ),
+        )
+
+        result = self._parse_json_response(response.text)
+        # 응답이 list이면 그대로, dict이면 빈 리스트
+        return result if isinstance(result, list) else []
+
     def generate_weekly_insights(
         self, week_label: str, daily_analyses: list[dict]
     ) -> dict:

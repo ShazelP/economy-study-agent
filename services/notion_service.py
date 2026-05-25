@@ -157,6 +157,7 @@ class NotionService:
         daily_analyses: list[dict],
         insights: dict,
         stats: dict | None = None,
+        quiz: list[dict] | None = None,
     ) -> str:
         """주간 정리 DB에 새 페이지를 생성하고 page_id 반환."""
         keywords = insights.get("keywords", [])
@@ -182,7 +183,7 @@ class NotionService:
         page_id: str = response["id"]
 
         # 페이지 본문 작성
-        blocks = self._build_weekly_blocks(daily_analyses, insights, stats)
+        blocks = self._build_weekly_blocks(daily_analyses, insights, stats, quiz)
         # Notion API는 한 번에 최대 100개 블록만 허용
         for i in range(0, len(blocks), 100):
             self.client.blocks.children.append(
@@ -193,7 +194,7 @@ class NotionService:
 
         return page_id
 
-    def _build_weekly_blocks(self, daily_analyses: list[dict], insights: dict, stats: dict | None = None) -> list[dict]:
+    def _build_weekly_blocks(self, daily_analyses: list[dict], insights: dict, stats: dict | None = None, quiz: list[dict] | None = None) -> list[dict]:
         def h1(text: str) -> dict:
             return {
                 "type": "heading_1",
@@ -294,5 +295,25 @@ class NotionService:
         blocks.append(divider())
         blocks.append(h2("👀 다음 주 주목 포인트"))
         blocks.append(paragraph(insights.get("next_watch", "")))
+
+        # ── 3. 주간 퀴즈 ───────────────────────────────────────────────────
+        if quiz:
+            blocks.append(divider())
+            blocks.append(h1("❓ 이번 주 퀴즈"))
+            for i, q in enumerate(quiz, 1):
+                blocks.append(h2(f"Q{i}. {q.get('question', '')}"))
+                for choice in q.get("choices", []):
+                    blocks.append(bullet(choice))
+                # 정답+해설은 토글로 숨김
+                blocks.append({
+                    "type": "toggle",
+                    "toggle": {
+                        "rich_text": [{"type": "text", "text": {"content": "▶ 정답 보기"}}],
+                        "children": [
+                            paragraph(f"정답: {q.get('answer', '')}"),
+                            paragraph(f"해설: {q.get('explanation', '')}"),
+                        ],
+                    },
+                })
 
         return blocks

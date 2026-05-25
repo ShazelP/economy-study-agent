@@ -92,12 +92,20 @@ def run(reference_date: date | None = None) -> None:
         print("⚠ 주간 인사이트 생성 실패")
         return
 
-    # 4. 스트릭 & 월별 출석률 계산
+    # 4. 주간 퀴즈 생성
+    print("\n주간 퀴즈 생성 중...")
+    quiz = claude.generate_weekly_quiz(week_label, daily_analyses)
+    if quiz:
+        print(f"  ✓ 퀴즈 {len(quiz)}문제 생성 완료")
+    else:
+        print("  ⚠ 퀴즈 생성 실패 — 건너뜀")
+
+    # 5. 스트릭 & 월별 출석률 계산
     print("출석 통계 계산 중...")
     stats = notion.get_attendance_stats(week_end)
     print(f"  🔥 연속 출석: {stats['streak']}일 | 📅 {stats['month_label']} 출석률: {stats['monthly_attended']}/{stats['monthly_total']}일 ({stats['monthly_rate']}%)")
 
-    # 5. 주간 정리 DB에 저장
+    # 6. 주간 정리 DB에 저장
     print("주간 정리 DB에 저장 중...")
     page_id = notion.create_weekly_summary(
         week_label=week_label,
@@ -107,6 +115,7 @@ def run(reference_date: date | None = None) -> None:
         daily_analyses=daily_analyses,
         insights=insights,
         stats=stats,
+        quiz=quiz or None,
     )
 
     print(f"\n{'='*50}")

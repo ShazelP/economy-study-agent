@@ -29,8 +29,9 @@ class ClaudeService:
         if user_notes:
             notes_text = "\n".join(f"- {n}" for n in user_notes)
             user_notes_section = (
-                f"사용자가 이 날 페이지에 직접 적어둔 메모 (모르는 용어, 궁금한 점 등):\n{notes_text}\n"
-                "→ term_explanations 항목에서 위 용어들을 반드시 포함해서 설명해주세요."
+                f"【사용자 메모】\n{notes_text}\n\n"
+                "→ 헤드라인·주요 내용 메모가 있으면 stories 분석의 핵심 근거로 활용하세요.\n"
+                "→ ?(물음표) 표시된 용어나 궁금한 점은 term_explanations에 반드시 포함해서 설명해주세요."
             )
         else:
             user_notes_section = ""
@@ -123,14 +124,29 @@ class ClaudeService:
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if match:
+            extracted = self._extract_json_object(cleaned)
+            if extracted:
                 try:
-                    return json.loads(match.group())
+                    return json.loads(extracted)
                 except json.JSONDecodeError:
                     pass
         print(f"[경고] JSON 파싱 실패. 원본 응답:\n{text[:300]}")
         return {}
+
+    def _extract_json_object(self, text: str) -> str | None:
+        """첫 번째 { 부터 매칭되는 } 까지 깊이 기반으로 추출."""
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        return None
 
     def _format_daily_summaries(self, analyses: list[dict]) -> str:
         lines: list[str] = []

@@ -9,6 +9,26 @@ from notion_client import Client
 import config
 
 
+def _get_entry_title(entry: dict) -> str:
+    try:
+        title_prop = entry["properties"].get("제목") or entry["properties"].get("Name") or {}
+        rich_text = title_prop.get("title", [])
+        if rich_text:
+            return rich_text[0]["plain_text"]
+    except (KeyError, IndexError):
+        pass
+    return ""
+
+
+def _parse_date_from_title(title: str) -> date | None:
+    """'20260526_화' → date(2026, 5, 26). 파싱 실패 시 None."""
+    try:
+        digits = title[:8]
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    except (ValueError, IndexError):
+        return None
+
+
 class NotionService:
     def __init__(self):
         self.client = Client(auth=config.NOTION_TOKEN)
@@ -16,28 +36,22 @@ class NotionService:
     # ── 일일 학습 DB ───────────────────────────────────────────────────────
 
     def get_weekly_entries(self, week_start: date, week_end: date) -> list[dict]:
-        """주간 날짜 범위에 해당하는 일일 학습 항목 조회 (AI 첨언 미완료 항목만)."""
+        """AI 첨언 미완료 항목 중 제목(YYYYMMDD_요일)을 파싱해 해당 주 항목을 반환."""
         response = self.client.databases.query(
             database_id=config.DAILY_DB_ID,
             filter={
-                "and": [
-                    {
-                        "property": config.DAILY_PROP_DATE,
-                        "date": {"on_or_after": week_start.isoformat()},
-                    },
-                    {
-                        "property": config.DAILY_PROP_DATE,
-                        "date": {"on_or_before": week_end.isoformat()},
-                    },
-                    {
-                        "property": config.DAILY_PROP_AI_DONE,
-                        "checkbox": {"equals": False},
-                    },
-                ]
+                "property": config.DAILY_PROP_AI_DONE,
+                "checkbox": {"equals": False},
             },
-            sorts=[{"property": config.DAILY_PROP_DATE, "direction": "ascending"}],
+            sorts=[{"property": "제목", "direction": "ascending"}],
         )
-        return response.get("results", [])
+        results = []
+        for entry in response.get("results", []):
+            title = _get_entry_title(entry)
+            entry_date = _parse_date_from_title(title)
+            if entry_date and week_start <= entry_date <= week_end:
+                results.append(entry)
+        return results
 
     def get_page_content(self, page_id: str) -> dict:
         """페이지 본문 블록을 순회하여 이미지 URL 목록과 사용자 텍스트 메모를 반환."""
@@ -133,18 +147,26 @@ class NotionService:
             "month_label": f"{year}년 {month}월",
         }
 
-    def update_daily_page(self, page_id: str, keywords: list[str]) -> None:
-        """일별 페이지의 키워드, 출석/AI 완료 체크박스만 업데이트한다. 본문은 건드리지 않음."""
-        self.client.pages.update(
-            page_id=page_id,
-            properties={
-                config.DAILY_PROP_KEYWORDS: {
-                    "multi_select": [{"name": kw} for kw in keywords]
-                },
-                config.DAILY_PROP_AI_DONE: {"checkbox": True},
-                config.DAILY_PROP_ATTENDANCE: {"checkbox": True},
+    def update_daily_page(
+        self,
+        page_id: str,
+        keywords: list[str],
+        entry_date: date | None = None,
+        day_of_week: str | None = None,
+    ) -> None:
+        """일별 페이지의 날짜·요일·키워드·출석/AI 완료 체크박스를 업데이트한다."""
+        properties: dict[str, Any] = {
+            config.DAILY_PROP_KEYWORDS: {
+                "multi_select": [{"name": kw} for kw in keywords]
             },
-        )
+            config.DAILY_PROP_AI_DONE: {"checkbox": True},
+            config.DAILY_PROP_ATTENDANCE: {"checkbox": True},
+        }
+        if entry_date:
+            properties[config.DAILY_PROP_DATE] = {"date": {"start": entry_date.isoformat()}}
+        if day_of_week:
+            properties[config.DAILY_PROP_DAY] = {"select": {"name": day_of_week}}
+        self.client.pages.update(page_id=page_id, properties=properties)
 
     # ── 주간 정리 DB ───────────────────────────────────────────────────────
 

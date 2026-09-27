@@ -22,6 +22,17 @@ def _render_story(story: dict) -> str:
         </article>"""
 
 
+def _clean_source_title(title: str) -> str:
+    """실제 기사 제목에서 breadcrumb/사이트명 꼬리표를 잘라내고 너무 길면 축약."""
+    for sep in (" < ", " | ", "｜"):
+        if sep in title:
+            title = title.split(sep)[0]
+    title = title.strip()
+    if len(title) > 42:
+        title = title[:42].rstrip() + "…"
+    return title
+
+
 def _render_link_calendar(daily_analyses: list[dict]) -> str:
     cells = []
     for day in daily_analyses:
@@ -30,9 +41,10 @@ def _render_link_calendar(daily_analyses: list[dict]) -> str:
         day_num = digits[6:8].lstrip("0") or digits[6:8]
 
         links = [
-            f'<li><a href="{_esc(s.get("source_url"))}" target="_blank" rel="noopener noreferrer">{_esc(s.get("title", ""))}</a></li>'
+            f'<li><a href="{_esc(src.get("url"))}" target="_blank" rel="noopener noreferrer">{_esc(_clean_source_title(src.get("title", "")))}</a></li>'
             for s in day.get("stories", [])
-            if s.get("source_url")
+            for src in s.get("sources", [])
+            if src.get("url")
         ]
         body = f'<ul class="link-list">{"".join(links)}</ul>' if links else '<p class="no-link">-</p>'
 

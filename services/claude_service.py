@@ -62,12 +62,15 @@ class ClaudeService:
         return result
 
     def _attach_source_urls(self, response, stories: list[dict]) -> None:
-        """각 story에 실제로 관련된 검색 출처를 찾아 story['source_url']에 매칭.
+        """각 story에 실제로 관련된 검색 출처를 찾아 story['sources']에 매칭 (최대 2개).
 
         1) 문자 오프셋으로 "이 기사 전체 구간"(title ~ 다음 기사 시작 전)에 걸리는 후보 링크를 모으고
            (기사 하나의 what/why/effect 전체를 아우르므로 이웃 기사 구간을 잘못 집는 경우가 줄어듦)
-        2) 후보 링크를 실제로 열어 진짜 페이지 제목을 가져와, 기사 제목의 단어가 들어있는지 검증
-        확신 있는 매칭이 없으면 조용히 건너뜀 (틀린 링크보다 링크 없는 게 낫다)."""
+        2) 후보 링크를 실제로 열어 진짜 페이지 제목을 가져와, 기사 제목의 단어가 2개 이상 들어있는지 검증
+           (1개만 겹치면 "서울"처럼 흔한 단어나 동음이의어로 오매칭될 수 있어서 배제)
+        확신 있는 매칭이 없으면 조용히 건너뜀 (틀린 링크보다 링크 없는 게 낫다).
+        링크 텍스트는 우리 쪽 제목이 아니라 검증에 쓴 실제 기사 제목을 그대로 사용
+        (여러 개 매칭될 때 서로 구분되고, 클릭 전에 실제 뭘 보게 될지 더 정확히 알 수 있음)."""
         candidates = getattr(response, "candidates", None)
         if not candidates:
             return
@@ -101,29 +104,45 @@ class ClaudeService:
             title_tokens = self._title_tokens(story.get("title", ""))
             if not title_tokens:
                 continue
+            required = min(2, len(title_tokens))
 
-            for idx in candidate_indices[:3]:
+            matched_urls: set[str] = set()
+            sources: list[dict] = []
+            for idx in candidate_indices[:12]:
+                if len(sources) >= 2:
+                    break
                 if idx >= len(chunks):
                     continue
                 chunk = chunks[idx]
                 if not (chunk.web and chunk.web.uri):
                     continue
                 real_url, real_title = self._resolve_and_get_title(chunk.web.uri)
-                if real_title and any(tok in real_title for tok in title_tokens):
-                    story["source_url"] = real_url
-                    break
+                if not real_title or not real_url or real_url in matched_urls:
+                    continue
+                overlap = sum(1 for tok in title_tokens if tok in real_title)
+                if overlap >= required:
+                    matched_urls.add(real_url)
+                    sources.append({"title": real_title, "url": real_url})
+
+            if sources:
+                story["sources"] = sources
 
     def _find_story_spans(self, raw_text: str, stories: list[dict]) -> list[tuple[int | None, int | None]]:
         """각 story의 'title' 값 위치를 raw 텍스트에서 찾아 (시작, 다음 story 시작 전까지) 구간 반환."""
         positions: list[int | None] = []
+        search_from = 0
         for story in stories:
             title = story.get("title", "")
             if not title:
                 positions.append(None)
                 continue
             needle = json.dumps(title, ensure_ascii=False)[1:-1]
-            pos = raw_text.find(needle)
-            positions.append(pos if pos != -1 else None)
+            pos = raw_text.find(needle, search_from)
+            if pos == -1:
+                positions.append(None)
+                continue
+            positions.append(pos)
+            search_from = pos + len(needle)
 
         spans: list[tuple[int | None, int | None]] = []
         for i, start in enumerate(positions):

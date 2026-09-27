@@ -58,6 +58,25 @@ class ClaudeService:
 
         return self._parse_json_response(response.text)
 
+    def generate_quiz_from_page_content(self, week_label: str, content_text: str) -> list[dict]:
+        """주간 정리 페이지 텍스트를 직접 활용해 퀴즈 생성."""
+        prompt = config.WEEKLY_QUIZ_PROMPT.replace(
+            "{{week_label}}", week_label
+        ).replace("{{daily_summaries}}", content_text)
+
+        response = _client.models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=config.SYSTEM_PROMPT,
+                max_output_tokens=8192,
+                temperature=0.5,
+                response_mime_type="application/json",
+            ),
+        )
+        result = self._parse_json_response(response.text)
+        return result if isinstance(result, list) else []
+
     def generate_weekly_quiz(
         self, week_label: str, daily_analyses: list[dict]
     ) -> list[dict]:
@@ -73,7 +92,7 @@ class ClaudeService:
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=config.SYSTEM_PROMPT,
-                max_output_tokens=4096,
+                max_output_tokens=8192,
                 temperature=0.5,
                 response_mime_type="application/json",
             ),
@@ -100,7 +119,7 @@ class ClaudeService:
                 system_instruction=config.SYSTEM_PROMPT,
                 max_output_tokens=8192,
                 temperature=0.3,
-                response_mime_type="application/json",
+                tools=[_SEARCH_TOOL],
             ),
         )
 

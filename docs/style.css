@@ -116,6 +116,61 @@ section.next-watch h2 {
   padding-left: 1.1rem;
 }
 
+.link-calendar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.link-day {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+  min-height: 100%;
+}
+
+.link-day-head {
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin-bottom: 0.4rem;
+}
+
+.link-day-head span {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: 0.3rem;
+}
+
+.link-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.link-list li {
+  margin-bottom: 0.35rem;
+}
+
+.link-list a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.link-list a:hover {
+  text-decoration: underline;
+}
+
+.no-link {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
 .day {
   margin-bottom: 0.75rem;
   border: 1px solid var(--border);

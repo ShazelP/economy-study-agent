@@ -56,7 +56,50 @@ class ClaudeService:
             ),
         )
 
-        return self._parse_json_response(response.text)
+        result = self._parse_json_response(response.text)
+        self._attach_source_urls(response, result.get("stories", []))
+        return result
+
+    def _attach_source_urls(self, response, stories: list[dict]) -> None:
+        """grounding_supports의 문자 오프셋을 이용해 각 story의 'what' 텍스트가
+        raw 응답 텍스트 어디서 나왔는지 찾고, 겹치는 검색 출처가 있으면 story['source_url']에 매칭.
+        확신 있는 매칭이 없으면 조용히 건너뜀 (틀린 링크보다 링크 없는 게 낫다)."""
+        candidates = getattr(response, "candidates", None)
+        if not candidates:
+            return
+        grounding_metadata = getattr(candidates[0], "grounding_metadata", None)
+        if not grounding_metadata:
+            return
+        chunks = grounding_metadata.grounding_chunks or []
+        supports = grounding_metadata.grounding_supports or []
+        if not chunks or not supports:
+            return
+
+        raw_text = response.text
+        for story in stories:
+            what = story.get("what", "")
+            if not what:
+                continue
+            needle = json.dumps(what, ensure_ascii=False)[1:-1]
+            start = raw_text.find(needle)
+            if start == -1:
+                continue
+            end = start + len(needle)
+
+            for support in supports:
+                seg = support.segment
+                if seg is None:
+                    continue
+                if seg.start_index is None or seg.end_index is None:
+                    continue
+                if seg.start_index < end and seg.end_index > start:
+                    indices = support.grounding_chunk_indices or []
+                    if not indices:
+                        continue
+                    chunk = chunks[indices[0]]
+                    if chunk.web and chunk.web.uri:
+                        story["source_url"] = chunk.web.uri
+                    break
 
     def generate_quiz_from_page_content(self, week_label: str, content_text: str) -> list[dict]:
         """주간 정리 페이지 텍스트를 직접 활용해 퀴즈 생성."""

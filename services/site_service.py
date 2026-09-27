@@ -22,6 +22,33 @@ def _render_story(story: dict) -> str:
         </article>"""
 
 
+def _render_link_calendar(daily_analyses: list[dict]) -> str:
+    cells = []
+    for day in daily_analyses:
+        label = day.get("date_label", "")
+        digits, _, weekday = label.partition("_")
+        day_num = digits[6:8].lstrip("0") or digits[6:8]
+
+        links = [
+            f'<li><a href="{_esc(s.get("source_url"))}" target="_blank" rel="noopener noreferrer">{_esc(s.get("title", ""))}</a></li>'
+            for s in day.get("stories", [])
+            if s.get("source_url")
+        ]
+        body = f'<ul class="link-list">{"".join(links)}</ul>' if links else '<p class="no-link">-</p>'
+
+        cells.append(f"""
+          <div class="link-day">
+            <div class="link-day-head">{_esc(day_num)}<span>{_esc(weekday)}</span></div>
+            {body}
+          </div>""")
+
+    return f"""
+      <section class="link-calendar-section">
+        <h1>🔗 관련 기사</h1>
+        <div class="link-calendar">{''.join(cells)}</div>
+      </section>"""
+
+
 def _render_day(day: dict) -> str:
     stories_html = "".join(_render_story(s) for s in day.get("stories", []))
     terms = day.get("term_explanations", [])
@@ -86,6 +113,7 @@ def render_weekly_page(
 ) -> str:
     """참여자 통계는 의도적으로 인자에 없음 — 공개 웹사이트에는 노출하지 않음."""
     days_html = "".join(_render_day(d) for d in daily_analyses)
+    link_calendar_html = _render_link_calendar(daily_analyses)
     themes_html = "".join(f"<li>{_esc(t)}</li>" for t in insights.get("key_themes", []))
     quiz_html = _render_quiz(quiz)
     archive_html = _render_archive_list() if include_archive else ""
@@ -123,6 +151,8 @@ def render_weekly_page(
     <h2>🏠 생활 인사이트</h2>
     <p>{_esc(insights.get('life_insight', ''))}</p>
   </section>
+
+  {link_calendar_html}
 
   <section class="daily">
     <h1>📰 일별 기사 정리</h1>

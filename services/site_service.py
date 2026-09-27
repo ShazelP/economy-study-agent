@@ -34,11 +34,11 @@ def _render_day(day: dict) -> str:
         terms_html = f'<div class="terms"><h4>📖 용어 정리</h4><ul>{items}</ul></div>'
 
     return f"""
-      <section class="day">
-        <h2>{_esc(day.get('date_label', ''))}</h2>
+      <details class="day">
+        <summary>{_esc(day.get('date_label', ''))}</summary>
         {stories_html}
         {terms_html}
-      </section>"""
+      </details>"""
 
 
 def _render_quiz(quiz: list[dict] | None) -> str:

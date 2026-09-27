@@ -117,7 +117,35 @@ section.next-watch h2 {
 }
 
 .day {
-  margin-bottom: 2rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 1.25rem;
+}
+
+.day summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 1.1rem;
+  font-weight: 700;
+  padding: 0.9rem 0;
+}
+
+.day summary::-webkit-details-marker {
+  display: none;
+}
+
+.day summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+
+.day[open] summary::before {
+  content: "▾ ";
+}
+
+.day[open] {
+  padding-bottom: 1.25rem;
 }
 
 .quiz-item {

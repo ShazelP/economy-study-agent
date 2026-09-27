@@ -155,7 +155,7 @@ def render_weekly_page(
   {link_calendar_html}
 
   <section class="daily">
-    <h1>📰 일별 기사 정리</h1>
+    <h1>📰 일별 주요 기사 정리</h1>
     {days_html}
   </section>
 

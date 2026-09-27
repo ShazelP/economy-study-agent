@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 
@@ -61,8 +62,11 @@ class ClaudeService:
         return result
 
     def _attach_source_urls(self, response, stories: list[dict]) -> None:
-        """grounding_supports의 문자 오프셋을 이용해 각 story의 'what' 텍스트가
-        raw 응답 텍스트 어디서 나왔는지 찾고, 겹치는 검색 출처가 있으면 story['source_url']에 매칭.
+        """각 story에 실제로 관련된 검색 출처를 찾아 story['source_url']에 매칭.
+
+        1) 문자 오프셋으로 "이 기사 전체 구간"(title ~ 다음 기사 시작 전)에 걸리는 후보 링크를 모으고
+           (기사 하나의 what/why/effect 전체를 아우르므로 이웃 기사 구간을 잘못 집는 경우가 줄어듦)
+        2) 후보 링크를 실제로 열어 진짜 페이지 제목을 가져와, 기사 제목의 단어가 들어있는지 검증
         확신 있는 매칭이 없으면 조용히 건너뜀 (틀린 링크보다 링크 없는 게 낫다)."""
         candidates = getattr(response, "candidates", None)
         if not candidates:
@@ -76,30 +80,77 @@ class ClaudeService:
             return
 
         raw_text = response.text
-        for story in stories:
-            what = story.get("what", "")
-            if not what:
-                continue
-            needle = json.dumps(what, ensure_ascii=False)[1:-1]
-            start = raw_text.find(needle)
-            if start == -1:
-                continue
-            end = start + len(needle)
+        spans = self._find_story_spans(raw_text, stories)
 
+        for story, (start, end) in zip(stories, spans):
+            if start is None:
+                continue
+
+            seen: set[int] = set()
+            candidate_indices: list[int] = []
             for support in supports:
                 seg = support.segment
-                if seg is None:
-                    continue
-                if seg.start_index is None or seg.end_index is None:
+                if seg is None or seg.start_index is None or seg.end_index is None:
                     continue
                 if seg.start_index < end and seg.end_index > start:
-                    indices = support.grounding_chunk_indices or []
-                    if not indices:
-                        continue
-                    chunk = chunks[indices[0]]
-                    if chunk.web and chunk.web.uri:
-                        story["source_url"] = chunk.web.uri
+                    for idx in support.grounding_chunk_indices or []:
+                        if idx not in seen:
+                            seen.add(idx)
+                            candidate_indices.append(idx)
+
+            title_tokens = self._title_tokens(story.get("title", ""))
+            if not title_tokens:
+                continue
+
+            for idx in candidate_indices[:3]:
+                if idx >= len(chunks):
+                    continue
+                chunk = chunks[idx]
+                if not (chunk.web and chunk.web.uri):
+                    continue
+                real_url, real_title = self._resolve_and_get_title(chunk.web.uri)
+                if real_title and any(tok in real_title for tok in title_tokens):
+                    story["source_url"] = real_url
                     break
+
+    def _find_story_spans(self, raw_text: str, stories: list[dict]) -> list[tuple[int | None, int | None]]:
+        """각 story의 'title' 값 위치를 raw 텍스트에서 찾아 (시작, 다음 story 시작 전까지) 구간 반환."""
+        positions: list[int | None] = []
+        for story in stories:
+            title = story.get("title", "")
+            if not title:
+                positions.append(None)
+                continue
+            needle = json.dumps(title, ensure_ascii=False)[1:-1]
+            pos = raw_text.find(needle)
+            positions.append(pos if pos != -1 else None)
+
+        spans: list[tuple[int | None, int | None]] = []
+        for i, start in enumerate(positions):
+            if start is None:
+                spans.append((None, None))
+                continue
+            end = len(raw_text)
+            for later in positions[i + 1:]:
+                if later is not None:
+                    end = later
+                    break
+            spans.append((start, end))
+        return spans
+
+    def _title_tokens(self, title: str) -> list[str]:
+        tokens = re.split(r"[^\w가-힣]+", title)
+        return [t for t in tokens if len(t) >= 2]
+
+    def _resolve_and_get_title(self, redirect_url: str) -> tuple[str | None, str | None]:
+        try:
+            with httpx.Client(timeout=8, follow_redirects=True) as http:
+                resp = http.get(redirect_url)
+            match = re.search(r"<title[^>]*>(.*?)</title>", resp.text, re.S | re.I)
+            page_title = html.unescape(match.group(1).strip()) if match else None
+            return str(resp.url), page_title
+        except Exception:
+            return None, None
 
     def generate_quiz_from_page_content(self, week_label: str, content_text: str) -> list[dict]:
         """주간 정리 페이지 텍스트를 직접 활용해 퀴즈 생성."""
